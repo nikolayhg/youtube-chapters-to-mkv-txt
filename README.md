@@ -3,7 +3,7 @@ Converts YouTube chapters from the console to txt file in MKV chapters format
 
 ## Usage
 
-- Copy converter.js contents
+- Copy [converter.js](/converter.js) contents
 - Paste them in the console of a YouTube video browser tab.
 - Confirm download the .txt file
 
