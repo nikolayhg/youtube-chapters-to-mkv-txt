@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>YouTube description → MKV chapters (.txt)</title>
+        <style>
+            :root {
+                font-family: system-ui,-apple-system,Segoe UI,Roboto,\"Helvetica Neue\",Arial;
+            }
+            body {
+                max-width: 900px;
+                margin: 28px auto;
+                padding: 20px;
+                line-height: 1.45;
+                color: #111;
+            }
+            h1 {
+                font-size: 20px;
+                margin: 0 0 8px;
+            }
+            p.lead {
+                margin: 0 0 18px;
+                color: #444;
+            }
+            textarea {
+                width: 100%;
+                height: 220px;
+                padding: 10px;
+                font-family: monospace;
+                font-size: 13px;
+                box-sizing: border-box;
+            }
+            .row {
+                display: flex;
+                gap: 10px;
+                margin-top: 10px;
+            }
+            button {
+                padding: 8px 12px;
+                border-radius: 8px;
+                border: 1px solid #ccc;
+                background: #f6f6f6;
+                cursor: pointer;
+            }
+            #convert {
+                background: #007bff;
+                color: white;
+                border-color: #007bff;
+            }
+            #convert:hover {
+                background: #0069d9;
+            }
+            button:active {
+                transform: translateY(1px);
+            }
+            pre {
+                background: #f8f8f8;
+                padding: 12px;
+                border-radius: 8px;
+                white-space: pre-wrap;
+            }
+            .meta {
+                display: flex;
+                gap: 12px;
+                align-items: center;
+                margin-top: 12px;
+            }
+            label {
+                font-size: 13px;
+            }
+            select,
+            input[type="number"] {
+                padding: 6px;
+                border-radius: 6px;
+                border: 1px solid #ccc;
+            }
+            footer {
+                margin-top: 18px;
+                color: #555;
+                font-size: 13px;
+            }
+            .note {
+                font-size: 13px;
+                color: #666;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>YouTube description → MKV chapters (.txt)</h1>
+        <p class="lead">
+            Paste your YouTube description chapters (the lines that start with
+            timestamps) into the box below. This offline page will convert them
+            into an MKV chapters text file suitable for <em>mkvmerge</em> /
+            <em>mkvpropedit</em>.
+        </p>
+
+        <textarea
+            id="input"
+            placeholder="Example:\n00:00 – Introduction\n00:20 - Why mornings cause stiffness & importance of stretching\n01:10 Lumbar Rotation Stretch\n02:00 — Thoracic (Upper Back) Rotation Stretch\n..."
+        ></textarea>
+
+        <div class="row">
+            <button id="convert">Convert → MKV chapters text</button>
+            <button id="copy">Copy result</button>
+            <button id="download">Download .txt</button>
+            <button id="clear">Clear</button>
+        </div>
+
+        <div class="meta">
+            <label
+                >Index padding:
+                <select id="pad">
+                    <option value="2">2 digits (CHAPTER01)</option>
+                    <option value="3">3 digits (CHAPTER001)</option>
+                </select></label
+            >
+            <label
+                >Milliseconds:
+                <select id="msopt">
+                    <option value=".000">Always show .000</option>
+                    <option value="present">Keep if present</option>
+                </select></label
+            >
+            <div style="flex: 1"></div>
+            <div class="note">
+                This page runs completely offline in your browser.
+            </div>
+        </div>
+
+        <h3 style="margin-top: 18px">Output preview</h3>
+        <pre id="output" aria-live="polite">(click Convert)</pre>
+
+        <footer>
+            If your lines don't start with timestamps the tool will ignore them.
+            Supported timestamp forms: <code>MM:SS</code>, <code>H:MM:SS</code>,
+            <code>HH:MM:SS</code>, optional fractional seconds like
+            <code>00:01:23.45</code>. Separators between timestamp and title can
+            be dash, en-dash, em-dash or spaces.
+        </footer>
+
+        <script>
+            function normalizeTimestamp(raw) {
+                let part = raw.trim();
+                let frac = "";
+                if (part.indexOf(".") !== -1) {
+                    const spl = part.split(".");
+                    part = spl[0];
+                    frac = spl[1] || "";
+                }
+                const comps = part
+                    .split(":")
+                    .map((s) => s.replace(/^0+(?=\d)|[^0-9]/g, "") || "0");
+                let hh = 0,
+                    mm = 0,
+                    ss = 0;
+                if (comps.length === 1) {
+                    ss = parseInt(comps[0]) || 0;
+                } else if (comps.length === 2) {
+                    mm = parseInt(comps[0]) || 0;
+                    ss = parseInt(comps[1]) || 0;
+                } else {
+                    hh = parseInt(comps[0]) || 0;
+                    mm = parseInt(comps[1]) || 0;
+                    ss = parseInt(comps[2]) || 0;
+                }
+                mm += Math.floor(ss / 60);
+                ss = ss % 60;
+                hh += Math.floor(mm / 60);
+                mm = mm % 60;
+                const H = String(hh).padStart(2, "0");
+                const M = String(mm).padStart(2, "0");
+                const S = String(ss).padStart(2, "0");
+                let msec = "";
+                if (frac !== "") {
+                    let ms = frac.padEnd(3, "0").slice(0, 3);
+                    msec = "." + ms;
+                }
+                return H + ":" + M + ":" + S + msec;
+            }
+
+            function parseLines(text, msOpt) {
+                const lines = text.split(/\r?\n/);
+                const entries = [];
+                const timeRegex =
+                    /^\s*((?:\d{1,2}:){1,2}\d{1,2}(?:\.\d+)?)\s*[-–—\u2013\u2014:]*\s*(.*)$/;
+                for (const raw of lines) {
+                    if (!raw.trim()) continue;
+                    const m = raw.match(timeRegex);
+                    if (m) {
+                        let ts = m[1];
+                        let title = m[2] ? m[2].trim() : "";
+                        if (!title) title = "";
+                        const norm = normalizeTimestamp(ts);
+                        let finalTs = norm;
+                        if (msOpt === "present") {
+                            if (ts.indexOf(".") === -1)
+                                finalTs = finalTs.replace(/\.000$/, "");
+                        }
+                        entries.push({ time: finalTs, title: title });
+                    } else {
+                        const m2 = raw.match(
+                            /^\s*((?:\d{1,2}:){1,2}\d{1,2}(?:\.\d+)?)\s+(.*)$/,
+                        );
+                        if (m2)
+                            entries.push({
+                                time: normalizeTimestamp(m2[1]),
+                                title: m2[2].trim(),
+                            });
+                    }
+                }
+                return entries;
+            }
+
+            function buildMkvText(entries, padLength, msOpt) {
+                let out = "";
+                for (let i = 0; i < entries.length; i++) {
+                    const idx = String(i + 1).padStart(padLength, "0");
+                    let ts = entries[i].time;
+                    if (msOpt === ".000") {
+                        if (!ts.match(/\.\d{1,3}$/)) ts = ts + ".000";
+                    }
+                    out += `CHAPTER${idx}=${ts}\n`;
+                    const name = entries[i].title || "";
+                    out += `CHAPTER${idx}NAME=${name}\n`;
+                }
+                if (!out)
+                    out =
+                        "# No chapters parsed. Make sure lines start with timestamps like 00:00 or 1:02:03.";
+                return out;
+            }
+
+            document.getElementById("convert").addEventListener("click", () => {
+                const text = document.getElementById("input").value;
+                const pad =
+                    parseInt(document.getElementById("pad").value, 10) || 2;
+                const msOpt = document.getElementById("msopt").value;
+                const entries = parseLines(text, msOpt);
+                const out = buildMkvText(entries, pad, msOpt);
+                document.getElementById("output").textContent = out;
+            });
+
+            document
+                .getElementById("copy")
+                .addEventListener("click", async () => {
+                    const out = document.getElementById("output").textContent;
+                    try {
+                        await navigator.clipboard.writeText(out);
+                        alert("Copied to clipboard");
+                    } catch (e) {
+                        const ta = document.createElement("textarea");
+                        ta.value = out;
+                        document.body.appendChild(ta);
+                        ta.select();
+                        document.execCommand("copy");
+                        ta.remove();
+                        alert("Copied to clipboard (fallback)");
+                    }
+                });
+
+            document
+                .getElementById("download")
+                .addEventListener("click", () => {
+                    const out = document.getElementById("output").textContent;
+                    const blob = new Blob([out], {
+                        type: "text/plain;charset=utf-8",
+                    });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = "chapters.txt";
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                });
+
+            document.getElementById("clear").addEventListener("click", () => {
+                document.getElementById("input").value = "";
+                document.getElementById("output").textContent =
+                    "(click Convert)";
+            });
+
+            window.addEventListener("load", () =>
+                document.getElementById("convert").click(),
+            );
+        </script>
+    </body>
+</html>
